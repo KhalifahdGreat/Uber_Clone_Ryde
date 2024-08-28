@@ -1,0 +1,161 @@
+version: 2.1
+
+jobs:
+  # SonarQube scan job
+  scan:
+    docker:
+      - image: ubuntu:20.04
+    working_directory: /tmp/workspace
+    environment:
+      ENV_FILE: /tmp/workspace/.circleenv
+      DOCKER_BUILDKIT: "1"
+      BUILDKIT_PROGRESS: plain
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /tmp/workspace
+      - run:
+          name: Install Java 17, set timezone, set JAVA_HOME, and install SonarQube scanner and Scan
+          command: |
+            # Update package list
+            apt-get update
+
+            # Install necessary utilities
+            apt-get install -y curl unzip
+
+            # Set non-interactive frontend for tzdata
+            export DEBIAN_FRONTEND=noninteractive
+
+            # Set the timezone to Africa/Lagos
+            ln -fs /usr/share/zoneinfo/Africa/Lagos /etc/localtime
+            apt-get install -y tzdata
+            dpkg-reconfigure --frontend noninteractive tzdata
+
+            # Install Java 17
+            apt-get install -y openjdk-17-jdk
+
+            # Set JAVA_HOME
+            export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+
+            # Install SonarScanner
+            export SONAR_SCANNER_VERSION=6.0.0.4432
+            export SONAR_SCANNER_HOME=$HOME/.sonar/sonar-scanner-$SONAR_SCANNER_VERSION-linux
+            curl --create-dirs -sSLo $HOME/.sonar/sonar-scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-$SONAR_SCANNER_VERSION-linux.zip
+            unzip -o $HOME/.sonar/sonar-scanner.zip -d $HOME/.sonar/
+
+            # Export the PATH and make sure sonar-scanner is accessible
+            export PATH=$SONAR_SCANNER_HOME/bin:$PATH
+
+            # Verify installation
+            sonar-scanner --version
+
+            sonar-scanner \
+            -Dsonar.projectKey=Banka_Sonar \
+            -Dsonar.sources=. \
+            -Dsonar.host.url=http://ec2-44-212-47-119.compute-1.amazonaws.com:9000 \
+            -Dsonar.login=$SONAR_TOKEN
+
+  # Build job
+  build:
+    docker:
+      - image: cimg/base:current
+    parallelism: 4
+    working_directory: ~/app
+    environment:
+      WWWGROUP: 1000
+      WWWUSER: 1000
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: 20.10.7
+
+      - run:
+          name: Create .env file
+          command: |
+            echo -e 'APP_NAME="Banka"' >> .env
+            echo -e 'APP_DOMAIN=banka.ng' >> .env
+            echo -e 'APP_ENV=production' >> .env
+            echo -e 'APP_KEY='${TEST_APP_KEY}'' >> .env
+            echo -e 'APP_DEBUG=false' >> .env
+            echo -e 'APP_URL=http://staging.banka.ng' >> .env
+            echo -e 'LOG_CHANNEL=stack' >> .env
+            echo -e 'LOG_DEPRECATIONS_CHANNEL=null' >> .env
+            echo -e 'LOG_LEVEL=debug' >> .env
+            echo -e 'DB_CONNECTION="mysql"' >> .env
+            echo -e 'DB_HOST="'${MYSQL_HOST}'"' >> .env
+            echo -e 'DB_PORT="'${MYSQL_PORT}'"' >> .env
+            echo -e 'DB_DATABASE="'${DB_DATABASE}'"' >> .env
+            echo -e 'DB_USERNAME="'${MYSQL_USERNAME}'"' >> .env
+            echo -e 'DB_PASSWORD="'${MYSQL_PASSWORD}'"' >> .env
+            echo -e 'SENTRY_LARAVEL_DSN="'${SENTRY_LARAVEL_DSN}'"' >> .env
+            echo -e 'BROADCAST_DRIVER=redis' >> .env
+            echo -e 'FILESYSTEM_DISK=s3' >> .env
+            echo -e 'QUEUE_CONNECTION=redis' >> .env
+            echo -e 'SESSION_DOMAIN=.banka.ng' >> .env
+            echo -e 'SESSION_DRIVER=redis' >> .env
+            echo -e 'SESSION_LIFETIME=120' >> .env
+            echo -e 'REDIS_HOST="'${REDIS_SERVER_HOST}'"' >> .env
+            echo -e 'REDIS_PASSWORD="'${REDIS_SERVER_PASSWORD}'"' >> .env
+            echo -e 'REDIS_PORT="'${REDIS_SERVER_PORT}'"' >> .env
+            echo -e 'REDIS_CLIENT=phpredis' >> .env
+            echo -e 'MAIL_MAILER=ses' >> .env
+            echo -e 'SES_KEY="'${AMAZON_SES_KEY}'"' >> .env
+            echo -e 'SES_SECRET="'${AMAZON_SES_SECRET}'"' >> .env
+            echo -e 'MAIL_HOST=sandbox.smtp.mailtrap.io' >> .env
+            echo -e 'MAIL_PORT=2525' >> .env
+            echo -e 'MAIL_USERNAME=21d4916704f198' >> .env
+            echo -e 'MAIL_PASSWORD=642139f6c2d0d1' >> .env
+            echo -e 'MAIL_ENCRYPTION=tls' >> .env
+            echo -e 'MAIL_FROM_ADDRESS="hi@banka.africa"' >> .env
+            echo -e 'MAIL_FROM_NAME="'${APP_NAME}'"' >> .env
+            echo -e 'NOVA_DOMAIN_NAME="admin.banka.ng"' >> .env
+            echo -e 'AWS_SES_KEY="'${AMAZON_SES_KEY}'"' >> .env
+            echo -e 'AWS_SES_SECRET="'${AMAZON_SES_SECRET}'"' >> .env
+            echo -e 'AWS_DEFAULT_REGION="'${DO_SPACES_REGION}'"' >> .env
+            echo -e 'AWS_ENDPOINT="'${DO_SPACES_ENDPOINT}'"' >> .env
+            echo -e 'AWS_BUCKET=banka' >> .env
+            echo -e 'AWS_URL=https://cdn.banka.africa' >> .env
+            echo -e 'VITE_APP_NAME="'${APP_NAME}'"' >> .env
+            echo -e 'FLUTTERWAVE_PUBLIC_KEY=FLWPUBK-b762f04b87554dfc35e5f5e683411657-X' >> .env
+            echo -e 'FLUTTERWAVE_SECRET_KEY=FLWSECK_TEST-f9227994bd88eee69b0d7bf2b122c552-X' >> .env
+            echo -e 'FLUTTERWAVE_SECRET_HASH=administer123456789' >> .env
+      - run:
+          name: Setup nova repository authentication
+          command: |
+            echo "{\"http-basic\":{\"nova.laravel.com\":{\"username\":\"${NOVA4_AUTH_USERNAME}\",\"password\":\"${NOVA4_AUTH_PASSWORD}\"}}}" > auth.json
+      - run:
+          name: Build Docker image
+          command: docker build -t $APP_IMAGE_NAME:latest -f Dockerfile .
+      - run:
+          name: Push Docker Image
+          command: |
+            echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+            docker tag $APP_IMAGE_NAME:latest $APP_IMAGE_NAME:$CIRCLE_SHA1
+            docker push $APP_IMAGE_NAME:latest
+            docker push $APP_IMAGE_NAME:$CIRCLE_SHA1
+      - run:
+          name: Install envsubst
+          command: |
+            sudo apt-get update && sudo apt-get -y install gettext-base
+      - run:
+          name: Install kubectl
+          command: |
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl
+            sudo mv kubectl /usr/local/bin/
+      - run:
+          name: Make test-deploy.sh executable
+          command: chmod +x ./scripts/test-deploy.sh
+      - run:
+          name: Deploy Code to Kubernetes
+          command: ./scripts/test-deploy.sh
+
+workflows:
+  version: 2
+  build-banka-os:
+    jobs:
+      - build:
+          context: org-wide
+          filters:
+            branches:
+              only: khalifah
